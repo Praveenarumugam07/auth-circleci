@@ -1,60 +1,57 @@
 version: 2.1
 
 executors:
-  default:
+  gcp-executor:
     docker:
-      - image: cimg/base:stable
+      - image: google/cloud-sdk:slim
+    working_directory: ~/repo
 
 jobs:
   deploy-to-gcp:
-    executor: default
+    executor: gcp-executor
     steps:
       - checkout
 
       - run:
-          name: Install Google Cloud SDK
+          name: Install prerequisites
           command: |
-            # Update package lists and install prerequisites
-            sudo apt update && sudo apt install -y curl apt-transport-https ca-certificates gnupg
+            apt update && \
+            apt install -y curl apt-transport-https ca-certificates gnupg
 
-            # Import Google Cloud public key and store it in a keyring file
-            curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+            # Import Google Cloud public key and store in keyring
+            curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+            gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
 
-            # Add Google Cloud SDK repository using signed-by to keyring
-            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+            # Add Google Cloud SDK repository
+            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
+            > /etc/apt/sources.list.d/google-cloud-sdk.list
 
             # Update and install google-cloud-sdk
-            sudo apt update && sudo apt install -y google-cloud-sdk
+            apt update && apt install -y google-cloud-sdk
 
       - run:
           name: Authenticate to Google Cloud using Workload Identity Federation
           command: |
-            # Replace with your values
-            PROJECT_ID="sylvan-hydra-464904-d9"
-            WIF_PROVIDER="projects/57920515119/locations/global/workloadIdentityPools/circleci-pool/providers/circleci-provider"
-            SERVICE_ACCOUNT_EMAIL="circleci-vm-deployer@$PROJECT_ID.iam.gserviceaccount.com"
+            # Create credential config using OIDC token from CircleCI
+            export OIDC_TOKEN=$(echo $CIRCLE_OIDC_TOKEN)
 
-            gcloud iam workload-identity-pools create-cred-config $WIF_PROVIDER \
-              --service-account=$SERVICE_ACCOUNT_EMAIL \
-              --output-file=credentials.json
+            gcloud iam workload-identity-pools create-cred-config \
+              "projects/57920515119/locations/global/workloadIdentityPools/circleci-pool/providers/circleci-provider" \
+              --service-account="circleci-vm-deployer@sylvan-hydra-464904-d9.iam.gserviceaccount.com" \
+              --credential-source-file=<(echo $OIDC_TOKEN) \
+              --output-file="credentials.json"
 
-            export GOOGLE_APPLICATION_CREDENTIALS="credentials.json"
-            export GOOGLE_CLOUD_PROJECT=$PROJECT_ID
+            # Activate service account with generated credentials
+            gcloud auth activate-service-account --key-file=credentials.json
 
       - run:
-          name: Deploy application to GCP VM
+          name: Deploy app to GCP VM
           command: |
-            PROJECT_ID="sylvan-hydra-464904-d9"
-            ZONE="asia-south1-c"
-            VM_NAME="my-vm"
-
-            gcloud config set project $PROJECT_ID
-
             # Check if VM exists
-            if ! gcloud compute instances describe $VM_NAME --zone $ZONE >/dev/null 2>&1; then
+            if ! gcloud compute instances describe my-vm --zone asia-south1-c >/dev/null 2>&1; then
               echo "VM does not exist. Creating..."
-              gcloud compute instances create $VM_NAME \
-                --zone $ZONE \
+              gcloud compute instances create my-vm \
+                --zone asia-south1-c \
                 --machine-type e2-medium \
                 --tags http-server \
                 --image-family debian-11 \
@@ -63,7 +60,7 @@ jobs:
                   sudo apt update
                   sudo apt install -y python3-pip
                   pip3 install flask
-                  cat \<< EOF > app.py
+                  cat << EOF > app.py
                   from flask import Flask
                   app = Flask(__name__)
                   @app.route("/")
