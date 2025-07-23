@@ -1,13 +1,12 @@
 version: 2.1
+
 executors:
   default:
     docker:
-      - image: cimg/base:stable
-    environment:
-      GOOGLE_PROJECT_ID: "sylvan-hydra-464904-d9"
+      - image: cimg/base:stable # Ubuntu base image without gcloud preinstalled
 
 jobs:
-  deploy:
+  deploy-to-gcp:
     executor: default
     steps:
       - checkout
@@ -16,31 +15,53 @@ jobs:
           name: Install Google Cloud SDK
           command: |
             sudo apt update && sudo apt install -y curl apt-transport-https ca-certificates gnupg
-            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-            curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+            curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
             sudo apt update && sudo apt install -y google-cloud-sdk
 
       - run:
-          name: Authenticate with Workload Identity Federation
+          name: Authenticate with GCP using Workload Identity Federation
           command: |
-            gcloud auth login --brief --cred-file=<( \
-              curl -s -H "Circle-Token: ${CIRCLE_TOKEN}" \
-              "https://oidc.circleci.com/org/46f18635-52e1-49fe-886e-64fad12edcff/oidc-token" \
-              | jq '{type:"external_account", audience:"https://oidc.circleci.com/org/46f18635-52e1-49fe-886e-64fad12edcff", subject_token_type:"urn:ietf:params:oauth:token-type:jwt", token_url:"https://sts.googleapis.com/v1/token", credential_source:{file:"/dev/null"}, service_account_impersonation_url:"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${GOOGLE_SERVICE_ACCOUNT_EMAIL}:generateAccessToken"}'
-            )
+            gcloud auth login --brief  # Only for testing locally
+            # For production WIF, use your environment variables or secrets
+            # Example:
+            # export GOOGLE_APPLICATION_CREDENTIALS_JSON="$GCLOUD_SERVICE_KEY"
+            # echo $GOOGLE_APPLICATION_CREDENTIALS_JSON > /tmp/key.json
+            # gcloud auth activate-service-account --key-file=/tmp/key.json
 
       - run:
-          name: Create VM if not exists and deploy app
+          name: Deploy application to GCP VM
           command: |
-            if ! gcloud compute instances describe my-vm --zone asia-south1-c >/dev/null 2>&1; then
+            # Replace these with your variables
+            PROJECT_ID="sylvan-hydra-464904-d9"
+            ZONE="asia-south1-c"
+            VM_NAME="my-vm"
+
+            gcloud config set project $PROJECT_ID
+
+            # Check if VM exists
+            if ! gcloud compute instances describe $VM_NAME --zone $ZONE >/dev/null 2>&1; then
               echo "VM does not exist. Creating..."
-              gcloud compute instances create my-vm \
-                --zone asia-south1-c \
+              gcloud compute instances create $VM_NAME \
+                --zone $ZONE \
                 --machine-type e2-medium \
                 --tags http-server \
                 --image-family debian-11 \
                 --image-project debian-cloud \
-                --metadata-from-file startup-script=startup-script.sh
+                --metadata startup-script='#! /bin/bash
+                  sudo apt update
+                  sudo apt install -y python3-pip
+                  pip3 install flask
+                  cat << EOF > app.py
+                  from flask import Flask
+                  app = Flask(__name__)
+                  @app.route("/")
+                  def hello():
+                      return "Hello from CircleCI and GCP VM!"
+                  if __name__ == "__main__":
+                      app.run(host="0.0.0.0", port=8080)
+                  EOF
+                  nohup python3 app.py &'
             else
               echo "VM already exists. Skipping creation."
             fi
@@ -65,6 +86,6 @@ jobs:
             echo "Your application is deployed at http://$EXTERNAL_IP:8080"
 
 workflows:
-  deploy_workflow:
+  deploy:
     jobs:
-      - deploy
+      - deploy-to-gcp
