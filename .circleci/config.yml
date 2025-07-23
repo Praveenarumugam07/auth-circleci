@@ -3,7 +3,7 @@ version: 2.1
 executors:
   default:
     docker:
-      - image: cimg/base:stable # Ubuntu base image without gcloud preinstalled
+      - image: cimg/base:stable
 
 jobs:
   deploy-to-gcp:
@@ -14,25 +14,36 @@ jobs:
       - run:
           name: Install Google Cloud SDK
           command: |
+            # Update package lists and install prerequisites
             sudo apt update && sudo apt install -y curl apt-transport-https ca-certificates gnupg
+
+            # Import Google Cloud public key and store it in a keyring file
             curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+
+            # Add Google Cloud SDK repository using signed-by to keyring
             echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+
+            # Update and install google-cloud-sdk
             sudo apt update && sudo apt install -y google-cloud-sdk
 
       - run:
-          name: Authenticate with GCP using Workload Identity Federation
+          name: Authenticate to Google Cloud using Workload Identity Federation
           command: |
-            gcloud auth login --brief  # Only for testing locally
-            # For production WIF, use your environment variables or secrets
-            # Example:
-            # export GOOGLE_APPLICATION_CREDENTIALS_JSON="$GCLOUD_SERVICE_KEY"
-            # echo $GOOGLE_APPLICATION_CREDENTIALS_JSON > /tmp/key.json
-            # gcloud auth activate-service-account --key-file=/tmp/key.json
+            # Replace with your values
+            PROJECT_ID="sylvan-hydra-464904-d9"
+            WIF_PROVIDER="projects/57920515119/locations/global/workloadIdentityPools/circleci-pool/providers/circleci-provider"
+            SERVICE_ACCOUNT_EMAIL="circleci-vm-deployer@$PROJECT_ID.iam.gserviceaccount.com"
+
+            gcloud iam workload-identity-pools create-cred-config $WIF_PROVIDER \
+              --service-account=$SERVICE_ACCOUNT_EMAIL \
+              --output-file=credentials.json
+
+            export GOOGLE_APPLICATION_CREDENTIALS="credentials.json"
+            export GOOGLE_CLOUD_PROJECT=$PROJECT_ID
 
       - run:
           name: Deploy application to GCP VM
           command: |
-            # Replace these with your variables
             PROJECT_ID="sylvan-hydra-464904-d9"
             ZONE="asia-south1-c"
             VM_NAME="my-vm"
@@ -52,7 +63,7 @@ jobs:
                   sudo apt update
                   sudo apt install -y python3-pip
                   pip3 install flask
-                  cat << EOF > app.py
+                  cat \<< EOF > app.py
                   from flask import Flask
                   app = Flask(__name__)
                   @app.route("/")
