@@ -26,8 +26,8 @@ jobs:
           command: |
             gcloud auth login --brief --cred-file=<( \
               curl -s -H "Circle-Token: ${CIRCLE_TOKEN}" \
-              "https://oidc.circleci.com/org/<your-org-id>/oidc-token" \
-              | jq '{type:"external_account", audience:"<audience>", subject_token_type:"urn:ietf:params:oauth:token-type:jwt", token_url:"https://sts.googleapis.com/v1/token", credential_source:{file:"/dev/null"}, service_account_impersonation_url:"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${GOOGLE_SERVICE_ACCOUNT_EMAIL}:generateAccessToken"}'
+              "https://oidc.circleci.com/org/46f18635-52e1-49fe-886e-64fad12edcff/oidc-token" \
+              | jq '{type:"external_account", audience:"https://oidc.circleci.com/org/46f18635-52e1-49fe-886e-64fad12edcff", subject_token_type:"urn:ietf:params:oauth:token-type:jwt", token_url:"https://sts.googleapis.com/v1/token", credential_source:{file:"/dev/null"}, service_account_impersonation_url:"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${GOOGLE_SERVICE_ACCOUNT_EMAIL}:generateAccessToken"}'
             )
 
       - run:
